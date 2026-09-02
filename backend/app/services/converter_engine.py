@@ -85,6 +85,22 @@ def apply_word_post_processing(
         except Exception as anchor_err:
             logger.warning(f"Failed to adjust drawing Z-order: {anchor_err}")
 
+        # 4. Optimize table layout and autofit for cross-suite compatibility (Microsoft Word & WPS Office)
+        try:
+            from docx.shared import Inches
+            for t in doc.tables:
+                t.autofit = True
+                tblPr = t._element.xpath("w:tblPr")
+                if tblPr:
+                    tblPr[0].append(parse_xml(f'<w:tblLayout {nsdecls("w")} w:type="autofit"/>'))
+                for row in t.rows:
+                    if len(row.cells) >= 3:
+                        row.cells[0].width = Inches(1.2)
+                        row.cells[1].width = Inches(4.5)
+                        row.cells[2].width = Inches(1.5)
+        except Exception as tbl_err:
+            logger.warning(f"Failed to optimize table layout: {tbl_err}")
+
         # 2. Inject Watermark if detected
         if watermark_info and doc.sections:
             watermark_text = watermark_info.get("text", "Watermark")
