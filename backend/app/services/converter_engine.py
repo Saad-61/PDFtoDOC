@@ -19,11 +19,14 @@ logger = logging.getLogger("pdf2docx.engine")
 def extract_pdf_watermark(pdf_path: Path) -> Optional[Dict[str, Any]]:
     """
     Scans PDF pages for rotated/diagonal background text blocks (e.g. 'Watermark', 'Confidential', 'Draft').
-    Returns watermark metadata if detected.
+    Returns watermark metadata and the list of page indices where it is present.
     """
     try:
         doc_pdf = fitz.open(str(pdf_path))
-        for page in doc_pdf:
+        wm_pages = []
+        wm_meta = None
+
+        for p_no, page in enumerate(doc_pdf):
             data = page.get_text("dict")
             for b in data.get("blocks", []):
                 for l in b.get("lines", []):
@@ -33,13 +36,27 @@ def extract_pdf_watermark(pdf_path: Path) -> Optional[Dict[str, Any]]:
                         for s in l.get("spans", []):
                             txt = s.get("text", "").strip()
                             if len(txt) > 1 and s.get("size", 0) >= 16:
-                                doc_pdf.close()
-                                return {
-                                    "text": txt,
-                                    "size": s.get("size", 36),
-                                    "font": s.get("font", "Calibri"),
-                                }
+                                if not wm_meta:
+                                    c = s.get("color", 0)
+                                    r = (c >> 16) & 0xFF
+                                    g = (c >> 8) & 0xFF
+                                    b_val = c & 0xFF
+                                    hex_col = f"{r:02x}{g:02x}{b_val:02x}".upper() if c != 0 else "2562EB"
+                                    font_name = s.get("font", "DejaVu Sans")
+                                    if "-" in font_name:
+                                        font_name = font_name.split("-")[0]
+                                    wm_meta = {
+                                        "text": txt,
+                                        "size": s.get("size", 42),
+                                        "font": font_name,
+                                        "color": hex_col,
+                                    }
+                                if p_no not in wm_pages:
+                                    wm_pages.append(p_no)
         doc_pdf.close()
+        if wm_meta:
+            wm_meta["pages_present"] = wm_pages
+            return wm_meta
         return None
     except Exception as e:
         logger.warning(f"Watermark pre-scan encountered an issue: {e}")
@@ -53,7 +70,11 @@ def apply_word_post_processing(
     """
     Applies essential post-processing to the generated Word DOCX:
     1. Forces default View to 'Print Layout' in word/settings.xml so Word never opens in Web/Draft mode.
-    2. Injects native diagonal Word watermark into the header layer if present in the source PDF.
+    2. Normalizes paragraph spacing and moves body page numbers to Word footers.
+    3. Retains floating user image layering in front of text (behindDoc="0").
+    4. Auto-fits table columns for cross-suite layout parity (Word + WPS Office).
+    5. Injects modern DrawingML watermark into the header (Page 1 only if detected only on Page 1).
+    6. Injects dynamic native Page Numbers (<w:fldSimple w:instr="PAGE"/>) into the footer.
     """
     try:
         doc = docx.Document(str(docx_path))
@@ -66,19 +87,23 @@ def apply_word_post_processing(
         except Exception as view_err:
             logger.warning(f"Failed to set print layout view setting: {view_err}")
 
-        # 2. Normalize paragraph spacing to prevent vertical height overflow across pages
+        # 2. Normalize paragraph spacing & remove standalone body page number paragraphs
         try:
             from docx.shared import Pt
-            for p in doc.paragraphs:
-                pf = p.paragraph_format
-                if pf.space_before and pf.space_before.pt > 6:
-                    pf.space_before = Pt(round(pf.space_before.pt * 0.45, 1))
-                pf.space_after = Pt(0)
-                pf.line_spacing = 1.0
+            for p in list(doc.paragraphs):
+                txt_clean = p.text.strip()
+                if txt_clean.isdigit() and len(txt_clean) <= 3:
+                    p._element.getparent().remove(p._element)
+                else:
+                    pf = p.paragraph_format
+                    if pf.space_before and pf.space_before.pt > 6:
+                        pf.space_before = Pt(round(pf.space_before.pt * 0.45, 1))
+                    pf.space_after = Pt(0)
+                    pf.line_spacing = 1.0
         except Exception as spacing_err:
             logger.warning(f"Failed to normalize paragraph spacing: {spacing_err}")
 
-        # 3. Ensure floating images and drawings overlay IN FRONT of text (behindDoc="0") matching original PDF
+        # 3. Ensure user images overlay IN FRONT of text (behindDoc="0")
         try:
             for anchor in doc._element.xpath(".//wp:anchor"):
                 anchor.set("behindDoc", "0")
@@ -101,65 +126,127 @@ def apply_word_post_processing(
         except Exception as tbl_err:
             logger.warning(f"Failed to optimize table layout: {tbl_err}")
 
-        # 2. Inject Watermark if detected
+        # 5. Inject Modern DrawingML Watermark if detected
         if watermark_info and doc.sections:
             watermark_text = watermark_info.get("text", "Watermark")
-            vml_xml = (
-                f'<w:p {nsdecls("w")} xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w10="urn:schemas-microsoft-com:office:word">\n'
+            watermark_font = watermark_info.get("font", "DejaVu Sans")
+            watermark_color = watermark_info.get("color", "2562EB")
+            wm_pages = watermark_info.get("pages_present", [0])
+
+            drawingml_xml = (
+                f'<w:p {nsdecls("w")} xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" '
+                f'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+                f'xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">\n'
                 f'  <w:pPr>\n'
                 f'    <w:pStyle w:val="Header"/>\n'
                 f'  </w:pPr>\n'
                 f'  <w:r>\n'
-                f'    <w:rPr>\n'
-                f'      <w:noProof/>\n'
-                f'    </w:rPr>\n'
-                f'    <w:pict>\n'
-                f'      <v:shapetype id="_x0000_t136" coordsize="21600,21600" o:spt="136" path="m@7,l@8,m@5,21600l@6,21600e">\n'
-                f'        <v:formulas>\n'
-                f'          <v:f eqn="val #0"/>\n'
-                f'          <v:f eqn="prod @0 41 1000"/>\n'
-                f'          <v:f eqn="prod @0 6 100"/>\n'
-                f'          <v:f eqn="sum 21600 0 @1"/>\n'
-                f'          <v:f eqn="sum 21600 0 @2"/>\n'
-                f'          <v:f eqn="sum 21600 0 #0"/>\n'
-                f'          <v:f eqn="prod #0 95 100"/>\n'
-                f'          <v:f eqn="prod #0 5 100"/>\n'
-                f'          <v:f eqn="prod #0 92 100"/>\n'
-                f'          <v:f eqn="prod #0 8 100"/>\n'
-                f'        </v:formulas>\n'
-                f'        <v:path textpathok="t" o:connecttype="rect"/>\n'
-                f'        <v:textpath on="t" fitshape="t" fitpath="t"/>\n'
-                f'        <v:handles>\n'
-                f'          <v:h position="#0,bottomRight" xrange="6629,14971"/>\n'
-                f'        </v:handles>\n'
-                f'        <o:lock v:ext="edit" text="t" shapetype="t"/>\n'
-                f'      </v:shapetype>\n'
-                f'      <v:shape id="PowerPlusWaterMarkObject357831078" o:spid="_x0000_s2049" type="#_x0000_t136" '
-                f'style="position:absolute;left:0;text-align:left;margin-left:0;margin-top:0;width:468pt;height:120pt;rotation:315;z-index:-251657216;mso-position-horizontal:center;mso-position-horizontal-relative:margin;mso-position-vertical:center;mso-position-vertical-relative:margin" '
-                f'o:allowincell="f" fillcolor="#c8c8c8" stroked="f">\n'
-                f'        <v:fill opacity=".45"/>\n'
-                f'        <v:textpath style="font-family:&quot;Calibri&quot;;font-size:48pt;font-weight:bold" string="{watermark_text}" on="t" fitshape="t" fitpath="t"/>\n'
-                f'        <w10:wrap type="none"/>\n'
-                f'        <w10:anchorlock/>\n'
-                f'      </v:shape>\n'
-                f'    </w:pict>\n'
+                f'    <w:drawing>\n'
+                f'      <wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="251658240" '
+                f'behindDoc="1" locked="0" layoutInCell="1" allowOverlap="1">\n'
+                f'        <wp:simplePos x="0" y="0"/>\n'
+                f'        <wp:positionH relativeFrom="page">\n'
+                f'          <wp:align>center</wp:align>\n'
+                f'        </wp:positionH>\n'
+                f'        <wp:positionV relativeFrom="page">\n'
+                f'          <wp:align>center</wp:align>\n'
+                f'        </wp:positionV>\n'
+                f'        <wp:extent cx="5486400" cy="1371600"/>\n'
+                f'        <wp:effectExtent l="0" t="0" r="0" b="0"/>\n'
+                f'        <wp:wrapNone/>\n'
+                f'        <wp:docPr id="9999" name="WatermarkShape"/>\n'
+                f'        <a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">\n'
+                f'          <a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">\n'
+                f'            <wps:wsp>\n'
+                f'              <wps:cNvSpPr txBox="1"/>\n'
+                f'              <wps:spPr>\n'
+                f'                <a:xfrm rot="18900000">\n'
+                f'                  <a:off x="0" y="0"/>\n'
+                f'                  <a:ext cx="5486400" cy="1371600"/>\n'
+                f'                </a:xfrm>\n'
+                f'                <a:prstGeom prst="rect">\n'
+                f'                  <a:avLst/>\n'
+                f'                </a:prstGeom>\n'
+                f'                <a:noFill/>\n'
+                f'                <a:ln>\n'
+                f'                  <a:noFill/>\n'
+                f'                </a:ln>\n'
+                f'              </wps:spPr>\n'
+                f'              <wps:txbx>\n'
+                f'                <w:txbxContent>\n'
+                f'                  <w:p>\n'
+                f'                    <w:pPr>\n'
+                f'                      <w:jc w:val="center"/>\n'
+                f'                    </w:pPr>\n'
+                f'                    <w:r>\n'
+                f'                      <w:rPr>\n'
+                f'                        <w:rFonts w:ascii="{watermark_font}" w:hAnsi="{watermark_font}" w:cs="{watermark_font}"/>\n'
+                f'                        <w:b/>\n'
+                f'                        <w:sz w:val="96"/>\n'
+                f'                        <w:szCs w:val="96"/>\n'
+                f'                        <w:color w:val="{watermark_color}"/>\n'
+                f'                      </w:rPr>\n'
+                f'                      <w:t>{watermark_text}</w:t>\n'
+                f'                    </w:r>\n'
+                f'                  </w:p>\n'
+                f'                </w:txbxContent>\n'
+                f'              </wps:txbx>\n'
+                f'              <wps:bodyPr vert="horz" lIns="0" tIns="0" rIns="0" bIns="0" anchor="ctr">\n'
+                f'                <a:noFill/>\n'
+                f'              </wps:bodyPr>\n'
+                f'            </wps:wsp>\n'
+                f'          </a:graphicData>\n'
+                f'        </a:graphic>\n'
+                f'      </wp:anchor>\n'
+                f'    </w:drawing>\n'
                 f'  </w:r>\n'
                 f'</w:p>'
             )
 
-            # Apply to Section 1
             sec1 = doc.sections[0]
-            header = sec1.header
-            header.is_linked_to_previous = False
-            for p in list(header.paragraphs):
-                p._element.getparent().remove(p._element)
-            header._element.append(parse_xml(vml_xml))
+            # If watermark was only on Page 1 in PDF, use different_first_page_header_footer
+            if wm_pages == [0]:
+                sec1.different_first_page_header_footer = True
+                f_header = sec1.first_page_header
+                for p in list(f_header.paragraphs):
+                    p._element.getparent().remove(p._element)
+                f_header._element.append(parse_xml(drawingml_xml))
 
-            # Link all subsequent sections to this header
-            for sec in doc.sections[1:]:
-                sec.header.is_linked_to_previous = True
+                for p in list(sec1.header.paragraphs):
+                    p._element.getparent().remove(p._element)
+            else:
+                header = sec1.header
+                for p in list(header.paragraphs):
+                    p._element.getparent().remove(p._element)
+                header._element.append(parse_xml(drawingml_xml))
+                for sec in doc.sections[1:]:
+                    sec.header.is_linked_to_previous = True
 
-            logger.info(f"Injected native diagonal watermark '{watermark_text}' across all sections")
+            logger.info(f"Injected modern DrawingML watermark '{watermark_text}' ({watermark_color}) on pages {wm_pages}")
+
+        # 6. Inject Native Page Number Field into Word Footers
+        try:
+            footer_page_xml = (
+                f'<w:p {nsdecls("w")}>\n'
+                f'  <w:pPr>\n'
+                f'    <w:pStyle w:val="Footer"/>\n'
+                f'    <w:jc w:val="center"/>\n'
+                f'  </w:pPr>\n'
+                f'  <w:fldSimple w:instr="PAGE"/>\n'
+                f'</w:p>'
+            )
+            for sec in doc.sections:
+                fp_ftr = sec.first_page_footer
+                for p in list(fp_ftr.paragraphs):
+                    p._element.getparent().remove(p._element)
+                fp_ftr._element.append(parse_xml(footer_page_xml))
+
+                ftr = sec.footer
+                for p in list(ftr.paragraphs):
+                    p._element.getparent().remove(p._element)
+                ftr._element.append(parse_xml(footer_page_xml))
+        except Exception as ftr_err:
+            logger.warning(f"Failed to inject footer page numbers: {ftr_err}")
 
         doc.save(str(docx_path))
         return True
