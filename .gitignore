@@ -37,12 +37,15 @@ pnpm-debug.log*
 .env.*
 !.env.example
 
-# Temporary Application Files
+# Temporary Application Files & Personal Documents
 .pdf2docx_temp/
 *.pdf_temp/
 *.tmp
 *.docx_temp/
 *.log
+SaadAsifResume.pdf
+*.pdf
+*.docx
 
 # IDE & OS specific files
 .vscode/
