@@ -33,6 +33,7 @@ def extract_pdf_watermark(pdf_path: Path) -> Optional[Dict[str, Any]]:
                         for s in l.get("spans", []):
                             txt = s.get("text", "").strip()
                             if len(txt) > 1 and s.get("size", 0) >= 16:
+                                doc_pdf.close()
                                 return {
                                     "text": txt,
                                     "size": s.get("size", 36),
@@ -45,56 +46,75 @@ def extract_pdf_watermark(pdf_path: Path) -> Optional[Dict[str, Any]]:
         return None
 
 
-def inject_word_watermark(
+def apply_word_post_processing(
     docx_path: Path,
-    watermark_text: str = "Watermark",
-    color: str = "#C0C0C0",
-    opacity: float = 0.35,
+    watermark_info: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """
-    Injects a native Word diagonal watermark VML shape into the header layer of all document sections.
-    This ensures the watermark renders diagonally underneath all text pages in Microsoft Word.
+    Applies essential post-processing to the generated Word DOCX:
+    1. Forces default View to 'Print Layout' in word/settings.xml so Word never opens in Web/Draft mode.
+    2. Injects native diagonal Word watermark into the header layer if present in the source PDF.
     """
     try:
         doc = docx.Document(str(docx_path))
-        vml_xml = (
-            f'<w:p {nsdecls("w")} xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">\n'
-            f'  <w:pPr>\n'
-            f'    <w:pStyle w:val="Header"/>\n'
-            f'  </w:pPr>\n'
-            f'  <w:r>\n'
-            f'    <w:rPr>\n'
-            f'      <w:noProof/>\n'
-            f'    </w:rPr>\n'
-            f'    <w:pict>\n'
-            f'      <v:shapetype id="_x0000_t136" coordsize="21600,21600" o:spt="136" adj="10800" path="m@7,l@8,m@5,21600l@6,21600e">\n'
-            f'        <v:path textpathok="t" o:connecttype="rect"/>\n'
-            f'        <v:textpath on="t" fitshape="t"/>\n'
-            f'        <v:handles>\n'
-            f'          <v:h position="#0,bottomRight" xrange="6629,14971"/>\n'
-            f'        </v:handles>\n'
-            f'      </v:shapetype>\n'
-            f'      <v:shape id="PowerPlusWaterMarkObject" o:spid="_x0000_s1025" type="#_x0000_t136" '
-            f'style="position:absolute;margin-left:0;margin-top:0;width:468pt;height:117pt;rotation:315;z-index:-251654144;mso-position-horizontal:center;mso-position-horizontal-relative:margin;mso-position-vertical:center;mso-position-vertical-relative:margin" '
-            f'fillcolor="{color}" stroked="f">\n'
-            f'        <v:fill opacity="{opacity}"/>\n'
-            f'        <v:textpath style="font-family:\'Calibri\';font-size:1pt" string="{watermark_text}"/>\n'
-            f'      </v:shape>\n'
-            f'    </w:pict>\n'
-            f'  </w:r>\n'
-            f'</w:p>'
-        )
 
-        if doc.sections:
-            header = doc.sections[0].header
-            watermark_p = parse_xml(vml_xml)
-            header._element.append(watermark_p)
+        # 1. Force Print Layout view mode by default in settings.xml
+        try:
+            settings_elm = doc.settings.element
+            view_xml = f'<w:view {nsdecls("w")} w:val="print"/>'
+            settings_elm.insert(0, parse_xml(view_xml))
+        except Exception as view_err:
+            logger.warning(f"Failed to set print layout view setting: {view_err}")
+
+        # 2. Inject Watermark if detected
+        if watermark_info and doc.sections:
+            watermark_text = watermark_info.get("text", "Watermark")
+            vml_xml = (
+                f'<w:p {nsdecls("w")} xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">\n'
+                f'  <w:pPr>\n'
+                f'    <w:pStyle w:val="Header"/>\n'
+                f'  </w:pPr>\n'
+                f'  <w:r>\n'
+                f'    <w:rPr>\n'
+                f'      <w:noProof/>\n'
+                f'    </w:rPr>\n'
+                f'    <w:pict>\n'
+                f'      <v:shapetype id="_x0000_t136" coordsize="21600,21600" o:spt="136" adj="10800" path="m@7,l@8,m@5,21600l@6,21600e">\n'
+                f'        <v:path textpathok="t" o:connecttype="rect"/>\n'
+                f'        <v:textpath on="t" fitshape="t"/>\n'
+                f'        <v:handles>\n'
+                f'          <v:h position="#0,bottomRight" xrange="6629,14971"/>\n'
+                f'        </v:handles>\n'
+                f'      </v:shapetype>\n'
+                f'      <v:shape id="PowerPlusWaterMarkObject" o:spid="_x0000_s1025" type="#_x0000_t136" '
+                f'style="position:absolute;margin-left:0;margin-top:0;width:468pt;height:117pt;rotation:315;z-index:-251654144;mso-position-horizontal:center;mso-position-horizontal-relative:margin;mso-position-vertical:center;mso-position-vertical-relative:margin" '
+                f'fillcolor="#B0B0B0" stroked="f">\n'
+                f'        <v:fill opacity="0.45"/>\n'
+                f'        <v:textpath style="font-family:\'Calibri\';font-size:1pt" string="{watermark_text}"/>\n'
+                f'      </v:shape>\n'
+                f'    </w:pict>\n'
+                f'  </w:r>\n'
+                f'</w:p>'
+            )
+
+            # Apply to Section 1
+            sec1 = doc.sections[0]
+            header = sec1.header
+            header.is_linked_to_previous = False
+            for p in list(header.paragraphs):
+                p._element.getparent().remove(p._element)
+            header._element.append(parse_xml(vml_xml))
+
+            # Link all subsequent sections to this header
+            for sec in doc.sections[1:]:
+                sec.header.is_linked_to_previous = True
+
+            logger.info(f"Injected native diagonal watermark '{watermark_text}' across all sections")
 
         doc.save(str(docx_path))
-        logger.info(f"Injected native diagonal watermark '{watermark_text}' into {docx_path.name}")
         return True
     except Exception as e:
-        logger.warning(f"Failed to inject watermark post-conversion: {e}")
+        logger.warning(f"Failed in post-processing Word DOCX: {e}")
         return False
 
 
@@ -178,7 +198,7 @@ def convert_pdf_sync(
     """
     Synchronous conversion engine function.
     Converts PDF layout to DOCX format page-by-page, invoking progress_callback after each page.
-    Automatically preserves background diagonal watermarks in Word OpenXML header layer.
+    Automatically preserves background diagonal watermarks and enforces Print Layout view.
     """
     start_time = time.time()
     unlocked_pdf_path: Optional[Path] = None
@@ -260,9 +280,9 @@ def convert_pdf_sync(
         # Step 4: Make DOCX
         cv.make_docx(str(docx_path), **cv_settings)
 
-        # Step 5: Post-processing watermark injection if detected in source PDF
-        if watermark_info and docx_path.exists():
-            inject_word_watermark(docx_path, watermark_text=watermark_info["text"])
+        # Step 5: Post-processing (Force Print Layout view + Watermark injection)
+        if docx_path.exists():
+            apply_word_post_processing(docx_path, watermark_info=watermark_info)
 
         duration = round(time.time() - start_time, 2)
         docx_size = docx_path.stat().st_size if docx_path.exists() else 0
