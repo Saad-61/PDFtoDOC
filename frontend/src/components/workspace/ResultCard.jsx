@@ -130,15 +130,6 @@ export function ResultCard({
           <ShieldCheck className="w-3.5 h-3.5 text-gold-400" />
           Temporary files automatically cleaned from server
         </span>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={onReset}
-          className="text-xs"
-        >
-          Re-Upload New PDF
-        </Button>
       </CardFooter>
     </Card>
   );

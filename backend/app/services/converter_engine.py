@@ -85,8 +85,8 @@ def inject_word_watermark(
             f'</w:p>'
         )
 
-        for section in doc.sections:
-            header = section.header
+        if doc.sections:
+            header = doc.sections[0].header
             watermark_p = parse_xml(vml_xml)
             header._element.append(watermark_p)
 
