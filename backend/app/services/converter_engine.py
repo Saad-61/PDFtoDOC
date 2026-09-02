@@ -66,6 +66,18 @@ def apply_word_post_processing(
         except Exception as view_err:
             logger.warning(f"Failed to set print layout view setting: {view_err}")
 
+        # 2. Normalize paragraph spacing to prevent vertical height overflow across pages
+        try:
+            from docx.shared import Pt
+            for p in doc.paragraphs:
+                pf = p.paragraph_format
+                if pf.space_before and pf.space_before.pt > 6:
+                    pf.space_before = Pt(round(pf.space_before.pt * 0.45, 1))
+                pf.space_after = Pt(0)
+                pf.line_spacing = 1.0
+        except Exception as spacing_err:
+            logger.warning(f"Failed to normalize paragraph spacing: {spacing_err}")
+
         # 2. Inject Watermark if detected
         if watermark_info and doc.sections:
             watermark_text = watermark_info.get("text", "Watermark")
