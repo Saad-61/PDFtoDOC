@@ -1,0 +1,94 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg-carbon: #121316;
+    --surface-1: #1A1B1F;
+    --surface-2: #222328;
+    --border-slate: #2E2F35;
+    --border-gold: #C5A059;
+    --gold-primary: #C5A059;
+    --gold-accent: #D4AF37;
+    --text-ivory: #F5F4F0;
+    --text-taupe: #A8A69E;
+    --text-dim: #686660;
+  }
+
+  body {
+    background-color: var(--bg-carbon);
+    color: var(--text-ivory);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    overflow-x: hidden;
+    letter-spacing: -0.01em;
+  }
+
+  /* Custom subtle scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #121316;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #2E2F35;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #C5A059;
+  }
+}
+
+/* Editorial Serif Headings */
+.font-display {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  letter-spacing: -0.02em;
+}
+
+/* Hairline borders */
+.border-hairline {
+  border-width: 1px;
+  border-color: #2E2F35;
+}
+
+.border-hairline-gold {
+  border-width: 1px;
+  border-color: #C5A059;
+}
+
+/* Subtle background grain/stipple effect */
+.bg-grain {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 0);
+  background-size: 24px 24px;
+}
+
+/* Tactile button pressed state */
+.btn-tactile {
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.btn-tactile:active {
+  transform: scale(0.985);
+}
+
+/* Liquid gold shimmer animation */
+@keyframes goldLiquid {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.shimmer-liquid {
+  background: linear-gradient(
+    90deg,
+    rgba(197, 160, 89, 0.2) 0%,
+    rgba(212, 175, 55, 0.6) 50%,
+    rgba(197, 160, 89, 0.2) 100%
+  );
+  background-size: 200% 100%;
+  animation: goldLiquid 2.5s infinite;
+}
