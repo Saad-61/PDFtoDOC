@@ -8,7 +8,6 @@ import {
   Trash2,
   Play,
   Layers,
-  Sparkles,
   Loader2,
 } from "lucide-react";
 import { formatBytes, isPdfFile } from "../../utils/fileHelpers";
@@ -272,7 +271,6 @@ export function BatchQueue() {
           onClick={startBatchConversion}
           disabled={isProcessingBatch || queuedCount === 0}
           size="default"
-          className="shadow-gold-glow"
         >
           {isProcessingBatch ? (
             <>

@@ -1,5 +1,5 @@
 import React from "react";
-import { ShieldCheck, Lock, Sparkles, Terminal } from "lucide-react";
+import { ShieldCheck, Lock, FileCheck2, Terminal } from "lucide-react";
 
 export function Footer() {
   return (
@@ -28,7 +28,7 @@ export function Footer() {
             AES-256 Decryption Support
           </span>
           <span className="flex items-center gap-1.5">
-            <Sparkles className="w-3 h-3 text-gold-500/70" />
+            <FileCheck2 className="w-3 h-3 text-gold-500/70" />
             Native OpenXML (.docx)
           </span>
         </div>

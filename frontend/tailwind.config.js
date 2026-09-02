@@ -28,7 +28,6 @@ export default {
           500: "#C5A059", // Primary Antique Gold
           600: "#AA863F",
           700: "#8B6B2B",
-          glow: "rgba(197, 160, 89, 0.15)",
         },
         ivory: {
           DEFAULT: "#F5F4F0",
@@ -61,18 +60,9 @@ export default {
       },
       boxShadow: {
         "editorial": "0 20px 40px -15px rgba(0, 0, 0, 0.7)",
-        "gold-glow": "0 0 25px rgba(197, 160, 89, 0.12)",
-        "gold-glow-lg": "0 0 45px rgba(197, 160, 89, 0.22)",
       },
       animation: {
-        "shimmer": "shimmer 2.5s ease-in-out infinite",
         "pulse-slow": "pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite",
-      },
-      keyframes: {
-        shimmer: {
-          "0%, 100%": { opacity: 0.4 },
-          "50%": { opacity: 1 },
-        },
       },
     },
   },

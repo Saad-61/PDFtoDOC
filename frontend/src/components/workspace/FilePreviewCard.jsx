@@ -6,7 +6,6 @@ import {
   Layers,
   ArrowRight,
   RotateCcw,
-  Sparkles,
   AlertTriangle,
 } from "lucide-react";
 import { formatBytes } from "../../utils/fileHelpers";
@@ -200,9 +199,9 @@ export function FilePreviewCard({
           onClick={handleConvertClick}
           disabled={isEncrypted && !hasPassword}
           size="lg"
-          className="w-full sm:w-auto shadow-gold-glow"
+          className="w-full sm:w-auto"
         >
-          <Sparkles className="w-4 h-4 mr-2" />
+          <FileText className="w-4 h-4 mr-2" />
           Reconstruct in Word (DOCX)
           <ArrowRight className="w-4 h-4 ml-2" />
         </Button>

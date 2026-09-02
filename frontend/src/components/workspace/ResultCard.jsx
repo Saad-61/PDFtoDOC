@@ -7,7 +7,7 @@ import {
   Clock,
   Layers,
   HardDrive,
-  Sparkles,
+  ShieldCheck,
 } from "lucide-react";
 import { formatBytes } from "../../utils/fileHelpers";
 import { fireGoldConfetti } from "../../utils/download";
@@ -34,7 +34,7 @@ export function ResultCard({
   const docxSize = docxBlob ? docxBlob.size : null;
 
   return (
-    <Card className="w-full max-w-2xl mx-auto border-gold-500/40 shadow-gold-glow-lg">
+    <Card className="w-full max-w-2xl mx-auto border-gold-500/40">
       <CardHeader className="flex flex-row items-center justify-between pb-3">
         <div>
           <Badge variant="forest" className="mb-1 py-0.5">
@@ -118,7 +118,7 @@ export function ResultCard({
         <Button
           onClick={onDownload}
           size="lg"
-          className="w-full h-14 text-base font-bold shadow-gold-glow"
+          className="w-full h-14 text-base font-bold"
         >
           <Download className="w-5 h-5 mr-2" />
           Download Word Document (.docx)
@@ -127,7 +127,7 @@ export function ResultCard({
 
       <CardFooter className="flex items-center justify-between bg-carbon-850/50">
         <span className="text-xs font-mono text-dim flex items-center gap-1.5">
-          <Sparkles className="w-3.5 h-3.5 text-gold-500" />
+          <ShieldCheck className="w-3.5 h-3.5 text-gold-400" />
           Temporary files automatically cleaned from server
         </span>
         <Button

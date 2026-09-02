@@ -6,7 +6,7 @@ import {
   FileCheck2,
   XCircle,
   Clock,
-  Sparkles,
+  ShieldCheck,
 } from "lucide-react";
 import { Progress } from "../ui/progress";
 import { Button } from "../ui/button";
@@ -98,7 +98,7 @@ export function ConversionProgress({
                 key={step.id}
                 className={`p-3.5 rounded-sm border transition-all flex items-start gap-3 ${
                   step.active
-                    ? "border-gold-500 bg-carbon-750/90 shadow-gold-glow"
+                    ? "border-gold-500 bg-carbon-750"
                     : step.completed
                     ? "border-slate-border bg-carbon-900/90 text-taupe"
                     : "border-slate-border/50 bg-carbon-900/30 opacity-40"
@@ -132,7 +132,7 @@ export function ConversionProgress({
 
       <CardFooter className="flex items-center justify-between bg-carbon-850/50">
         <span className="text-xs font-mono text-dim flex items-center gap-1.5">
-          <Sparkles className="w-3.5 h-3.5 text-gold-500" />
+          <ShieldCheck className="w-3.5 h-3.5 text-gold-400" />
           Processing with isolated memory worker
         </span>
         {onCancel && (

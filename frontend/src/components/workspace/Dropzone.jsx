@@ -88,7 +88,7 @@ export function Dropzone({ onFileSelected, isProcessing = false }) {
           onClick={() => !isProcessing && fileInputRef.current?.click()}
           className={`relative cursor-pointer p-10 sm:p-14 border border-dashed rounded-md transition-all duration-200 flex flex-col items-center justify-center text-center select-none ${
             isDragOver
-              ? "border-gold-500 bg-carbon-750/90 shadow-gold-glow-lg scale-[1.005]"
+              ? "border-gold-500 bg-carbon-750 scale-[1.005]"
               : "border-slate-border hover:border-gold-500/60 bg-carbon-800/80 hover:bg-carbon-800"
           }`}
         >
@@ -102,7 +102,7 @@ export function Dropzone({ onFileSelected, isProcessing = false }) {
           <div
             className={`w-16 h-16 rounded-full flex items-center justify-center mb-5 transition-transform duration-300 ${
               isDragOver
-                ? "bg-gold-500 text-carbon-950 scale-110 shadow-gold-glow"
+                ? "bg-gold-500 text-carbon-950 scale-110"
                 : "bg-carbon-700 text-gold-400 border border-slate-border group-hover:scale-105"
             }`}
           >
@@ -124,7 +124,7 @@ export function Dropzone({ onFileSelected, isProcessing = false }) {
             type="button"
             variant="default"
             size="lg"
-            className="pointer-events-none shadow-gold-glow"
+            className="pointer-events-none"
           >
             <FilePlus className="w-4 h-4 mr-2" />
             Browse PDF Document

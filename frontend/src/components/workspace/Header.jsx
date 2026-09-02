@@ -34,7 +34,7 @@ export function Header({ mode, setMode }) {
       <div className="max-w-6xl mx-auto px-6 h-20 flex items-center justify-between">
         {/* Brand & Editorial Seal */}
         <div className="flex items-center gap-3.5">
-          <div className="w-10 h-10 rounded-sm bg-carbon-800 border border-gold-500/40 flex items-center justify-center shadow-gold-glow">
+          <div className="w-10 h-10 rounded-sm bg-carbon-800 border border-slate-border flex items-center justify-center">
             <FileText className="w-5 h-5 text-gold-400" />
           </div>
           <div>
