@@ -1,6 +1,6 @@
 # PDF to DOCX — Editorial Document Reconstructor
 
-A high-performance, layout-preserving **PDF to Word DOCX converter** built with **Python (FastAPI)** and **React (Vite)**. Styled with an understated **"Old Money" dark editorial visual identity**, the system emphasizes privacy-first ephemeral storage, real-time Server-Sent Events (SSE) progress tracking, and precision layout reconstruction.
+A high-performance, layout-preserving **PDF to Word DOCX converter** built with **Python (FastAPI)** and **React (Vite)**. Styled with an understated "Old Money" dark editorial visual identity, the system emphasizes privacy-first ephemeral storage, real-time Server-Sent Events (SSE) progress tracking, and precision layout reconstruction.
 
 ---
 
