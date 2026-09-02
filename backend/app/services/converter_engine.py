@@ -3,14 +3,99 @@ import time
 import logging
 import asyncio
 from pathlib import Path
-from typing import List, Optional, Callable
+from typing import List, Optional, Callable, Dict, Any
 import fitz
 from pdf2docx import Converter
+import docx
+from docx.oxml import parse_xml
+from docx.oxml.ns import nsdecls
 
 from app.core.config import settings
 from app.core.exceptions import ConversionException, FileValidationException
 
 logger = logging.getLogger("pdf2docx.engine")
+
+
+def extract_pdf_watermark(pdf_path: Path) -> Optional[Dict[str, Any]]:
+    """
+    Scans PDF pages for rotated/diagonal background text blocks (e.g. 'Watermark', 'Confidential', 'Draft').
+    Returns watermark metadata if detected.
+    """
+    try:
+        doc_pdf = fitz.open(str(pdf_path))
+        for page in doc_pdf:
+            data = page.get_text("dict")
+            for b in data.get("blocks", []):
+                for l in b.get("lines", []):
+                    dx, dy = l.get("dir", (1, 0))
+                    # Rotated / diagonal line (|dy| > 0.1)
+                    if abs(dy) > 0.1:
+                        for s in l.get("spans", []):
+                            txt = s.get("text", "").strip()
+                            if len(txt) > 1 and s.get("size", 0) >= 16:
+                                return {
+                                    "text": txt,
+                                    "size": s.get("size", 36),
+                                    "font": s.get("font", "Calibri"),
+                                }
+        doc_pdf.close()
+        return None
+    except Exception as e:
+        logger.warning(f"Watermark pre-scan encountered an issue: {e}")
+        return None
+
+
+def inject_word_watermark(
+    docx_path: Path,
+    watermark_text: str = "Watermark",
+    color: str = "#C0C0C0",
+    opacity: float = 0.35,
+) -> bool:
+    """
+    Injects a native Word diagonal watermark VML shape into the header layer of all document sections.
+    This ensures the watermark renders diagonally underneath all text pages in Microsoft Word.
+    """
+    try:
+        doc = docx.Document(str(docx_path))
+        vml_xml = (
+            f'<w:p {nsdecls("w")} xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">\n'
+            f'  <w:pPr>\n'
+            f'    <w:pStyle w:val="Header"/>\n'
+            f'  </w:pPr>\n'
+            f'  <w:r>\n'
+            f'    <w:rPr>\n'
+            f'      <w:noProof/>\n'
+            f'    </w:rPr>\n'
+            f'    <w:pict>\n'
+            f'      <v:shapetype id="_x0000_t136" coordsize="21600,21600" o:spt="136" adj="10800" path="m@7,l@8,m@5,21600l@6,21600e">\n'
+            f'        <v:path textpathok="t" o:connecttype="rect"/>\n'
+            f'        <v:textpath on="t" fitshape="t"/>\n'
+            f'        <v:handles>\n'
+            f'          <v:h position="#0,bottomRight" xrange="6629,14971"/>\n'
+            f'        </v:handles>\n'
+            f'      </v:shapetype>\n'
+            f'      <v:shape id="PowerPlusWaterMarkObject" o:spid="_x0000_s1025" type="#_x0000_t136" '
+            f'style="position:absolute;margin-left:0;margin-top:0;width:468pt;height:117pt;rotation:315;z-index:-251654144;mso-position-horizontal:center;mso-position-horizontal-relative:margin;mso-position-vertical:center;mso-position-vertical-relative:margin" '
+            f'fillcolor="{color}" stroked="f">\n'
+            f'        <v:fill opacity="{opacity}"/>\n'
+            f'        <v:textpath style="font-family:\'Calibri\';font-size:1pt" string="{watermark_text}"/>\n'
+            f'      </v:shape>\n'
+            f'    </w:pict>\n'
+            f'  </w:r>\n'
+            f'</w:p>'
+        )
+
+        for section in doc.sections:
+            header = section.header
+            watermark_p = parse_xml(vml_xml)
+            header._element.append(watermark_p)
+
+        doc.save(str(docx_path))
+        logger.info(f"Injected native diagonal watermark '{watermark_text}' into {docx_path.name}")
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to inject watermark post-conversion: {e}")
+        return False
 
 
 def parse_page_range(range_str: Optional[str], total_pages: int) -> List[int]:
@@ -93,6 +178,7 @@ def convert_pdf_sync(
     """
     Synchronous conversion engine function.
     Converts PDF layout to DOCX format page-by-page, invoking progress_callback after each page.
+    Automatically preserves background diagonal watermarks in Word OpenXML header layer.
     """
     start_time = time.time()
     unlocked_pdf_path: Optional[Path] = None
@@ -121,6 +207,9 @@ def convert_pdf_sync(
                 message=f"Failed to decrypt password-protected PDF: {e}",
                 code="DECRYPTION_ERROR",
             )
+
+    # Pre-scan for background watermarks before conversion
+    watermark_info = extract_pdf_watermark(effective_pdf_path)
 
     cv: Optional[Converter] = None
     try:
@@ -170,6 +259,10 @@ def convert_pdf_sync(
 
         # Step 4: Make DOCX
         cv.make_docx(str(docx_path), **cv_settings)
+
+        # Step 5: Post-processing watermark injection if detected in source PDF
+        if watermark_info and docx_path.exists():
+            inject_word_watermark(docx_path, watermark_text=watermark_info["text"])
 
         duration = round(time.time() - start_time, 2)
         docx_size = docx_path.stat().st_size if docx_path.exists() else 0
