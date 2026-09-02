@@ -78,6 +78,13 @@ def apply_word_post_processing(
         except Exception as spacing_err:
             logger.warning(f"Failed to normalize paragraph spacing: {spacing_err}")
 
+        # 3. Ensure floating images and drawings overlay IN FRONT of text (behindDoc="0") matching original PDF
+        try:
+            for anchor in doc._element.xpath(".//wp:anchor"):
+                anchor.set("behindDoc", "0")
+        except Exception as anchor_err:
+            logger.warning(f"Failed to adjust drawing Z-order: {anchor_err}")
+
         # 2. Inject Watermark if detected
         if watermark_info and doc.sections:
             watermark_text = watermark_info.get("text", "Watermark")
