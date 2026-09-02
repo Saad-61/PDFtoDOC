@@ -105,7 +105,7 @@ def apply_word_post_processing(
         if watermark_info and doc.sections:
             watermark_text = watermark_info.get("text", "Watermark")
             vml_xml = (
-                f'<w:p {nsdecls("w")} xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">\n'
+                f'<w:p {nsdecls("w")} xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w10="urn:schemas-microsoft-com:office:word">\n'
                 f'  <w:pPr>\n'
                 f'    <w:pStyle w:val="Header"/>\n'
                 f'  </w:pPr>\n'
@@ -138,7 +138,9 @@ def apply_word_post_processing(
                 f'style="position:absolute;margin-left:0;margin-top:0;width:468pt;height:117pt;rotation:315;z-index:-251657216;mso-position-horizontal:center;mso-position-horizontal-relative:margin;mso-position-vertical:center;mso-position-vertical-relative:margin" '
                 f'o:allowincell="f" fillcolor="#D8D8D8" stroked="f">\n'
                 f'        <v:fill opacity="0.35"/>\n'
-                f'        <v:textpath style="font-family:\'Calibri\';font-size:1pt" string="{watermark_text}"/>\n'
+                f'        <v:textpath style="font-family:&quot;Calibri&quot;;font-size:1pt" string="{watermark_text}"/>\n'
+                f'        <w10:wrap type="none"/>\n'
+                f'        <w10:anchorlock/>\n'
                 f'      </v:shape>\n'
                 f'    </w:pict>\n'
                 f'  </w:r>\n'
