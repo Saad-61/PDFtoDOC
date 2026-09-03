@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { FileText, ShieldCheck, Activity } from "lucide-react";
+import { FileText } from "lucide-react";
 import { fetchHealth } from "../../services/api";
 import { Badge } from "../ui/badge";
 
@@ -14,7 +14,7 @@ export function Header({ mode, setMode }) {
         if (isMounted) {
           setServerHealth({ online: data.status === "healthy", checking: false, version: data.version });
         }
-      } catch (err) {
+      } catch {
         if (isMounted) {
           setServerHealth({ online: false, checking: false });
         }

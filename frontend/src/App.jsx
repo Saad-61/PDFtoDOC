@@ -14,7 +14,6 @@ import { usePdfPreflight } from "./hooks/usePdfPreflight";
 import {
   createConversionJob,
   subscribeToJobEvents,
-  convertPdfStream,
   apiClient,
 } from "./services/api";
 import { triggerBlobDownload } from "./utils/download";

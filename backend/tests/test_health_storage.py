@@ -1,6 +1,5 @@
 import io
 import time
-from pathlib import Path
 import pytest
 from fastapi import UploadFile
 from app.core.exceptions import FileValidationException

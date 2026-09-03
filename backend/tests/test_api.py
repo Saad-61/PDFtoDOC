@@ -1,12 +1,10 @@
 import io
-import json
 import asyncio
 from pathlib import Path
 import pytest
 import docx
 
-from app.services.converter_engine import parse_page_range
-from tests.test_validator_engine import create_sample_pdf, create_scanned_pdf
+from tests.test_validator_engine import create_sample_pdf
 
 
 @pytest.mark.asyncio

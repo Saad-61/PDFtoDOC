@@ -1,6 +1,5 @@
 import React, { useEffect } from "react";
 import { cn } from "../../utils/cn";
-import { X } from "lucide-react";
 
 export function Dialog({ open, onClose, children, className }) {
   useEffect(() => {

@@ -1,4 +1,3 @@
-import os
 import time
 from datetime import datetime, timezone
 import psutil
@@ -6,7 +5,6 @@ from fastapi import APIRouter, status
 from pydantic import BaseModel
 
 from app.core.config import settings
-from app.services.storage import storage_manager
 
 router = APIRouter()
 START_TIME = time.time()

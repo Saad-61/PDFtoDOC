@@ -1,14 +1,20 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 
 export function NumberCounter({ value = 0, duration = 300, suffix = "" }) {
   const [displayValue, setDisplayValue] = useState(value);
+  const prevValueRef = useRef(value);
 
   useEffect(() => {
-    let start = displayValue;
+    const start = prevValueRef.current;
     const end = value;
-    if (start === end) return;
+    prevValueRef.current = value;
+    if (start === end) {
+      setDisplayValue(end);
+      return;
+    }
 
     const startTime = performance.now();
+    let animationFrameId;
 
     const updateCounter = (currentTime) => {
       const elapsed = currentTime - startTime;
@@ -17,11 +23,16 @@ export function NumberCounter({ value = 0, duration = 300, suffix = "" }) {
       setDisplayValue(current);
 
       if (progress < 1) {
-        requestAnimationFrame(updateCounter);
+        animationFrameId = requestAnimationFrame(updateCounter);
       }
     };
 
-    requestAnimationFrame(updateCounter);
+    animationFrameId = requestAnimationFrame(updateCounter);
+    return () => {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+      }
+    };
   }, [value, duration]);
 
   return <span>{displayValue}{suffix}</span>;

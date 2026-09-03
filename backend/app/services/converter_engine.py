@@ -1,11 +1,15 @@
-import os
 import time
 import logging
 import asyncio
+import re
+import math
 from pathlib import Path
 from typing import List, Optional, Callable, Dict, Any
 import fitz
-from pdf2docx import Converter
+try:
+    from pdf2docx import Converter
+except ImportError:  # pragma: no cover
+    Converter = Any  # type: ignore
 import docx
 from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
@@ -16,65 +20,265 @@ from app.core.exceptions import ConversionException, FileValidationException
 logger = logging.getLogger("pdf2docx.engine")
 
 
-def extract_pdf_watermark(pdf_path: Path) -> Optional[Dict[str, Any]]:
+def render_rich_footer_runs(
+    text: str,
+    default_font: str = "Calibri",
+    default_sz: int = 16,
+    default_color: str = "71717A",
+) -> str:
     """
-    Scans PDF pages for rotated/diagonal background text blocks (e.g. 'Watermark', 'Confidential', 'Draft').
-    Returns watermark metadata and the list of page indices where it is present.
+    Splits text into regular runs and hyperlinked runs (URLs and Emails) with native blue color and single underline.
+    """
+    pattern = r'(https?://[^\s,]+|www\.[^\s,]+|[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)'
+    tokens = re.split(pattern, text)
+    runs_xml = []
+    for token in tokens:
+        if not token:
+            continue
+        if re.match(r'^(https?://|www\.)', token, re.I) or ('@' in token and '.' in token):
+            # Hyperlink run: Theme Blue (#0563C1), single underline
+            runs_xml.append(
+                f'  <w:r>\n'
+                f'    <w:rPr>\n'
+                f'      <w:rFonts w:ascii="{default_font}" w:hAnsi="{default_font}"/>\n'
+                f'      <w:sz w:val="{default_sz}"/>\n'
+                f'      <w:color w:val="0563C1"/>\n'
+                f'      <w:u w:val="single"/>\n'
+                f'    </w:rPr>\n'
+                f'    <w:t xml:space="preserve">{token}</w:t>\n'
+                f'  </w:r>'
+            )
+        else:
+            # Regular text run
+            runs_xml.append(
+                f'  <w:r>\n'
+                f'    <w:rPr>\n'
+                f'      <w:rFonts w:ascii="{default_font}" w:hAnsi="{default_font}"/>\n'
+                f'      <w:sz w:val="{default_sz}"/>\n'
+                f'      <w:color w:val="{default_color}"/>\n'
+                f'    </w:rPr>\n'
+                f'    <w:t xml:space="preserve">{token}</w:t>\n'
+                f'  </w:r>'
+            )
+    return "\n".join(runs_xml)
+
+
+def analyze_pdf_layout_structure(pdf_path: Path) -> Dict[str, Any]:
+    """
+    Comprehensive pre-flight analyzer that scans all pages of a PDF to extract:
+    1. Diagonal / rotated text watermarks (e.g. 'Watermark', 'Confidential', 'Draft').
+    2. Image classification (background watermark emblem vs foreground photo/signature).
+    3. Footer classification (page numbers vs contact info vs empty).
+    4. Text signatures for cleaning misplaced body paragraphs.
     """
     try:
         doc_pdf = fitz.open(str(pdf_path))
-        wm_pages = []
-        wm_meta = None
+        num_pages = len(doc_pdf)
+        if num_pages == 0:
+            return {
+                "watermark": None,
+                "has_page_numbers": False,
+                "has_text_footer": False,
+                "footer_rows": [],
+                "body_cleaning_signatures": [],
+                "background_image_xrefs": set(),
+            }
 
-        for p_no, page in enumerate(doc_pdf):
-            data = page.get_text("dict")
-            for b in data.get("blocks", []):
-                for l in b.get("lines", []):
-                    dx, dy = l.get("dir", (1, 0))
-                    # Rotated / diagonal line (|dy| > 0.1)
-                    if abs(dy) > 0.1:
-                        for s in l.get("spans", []):
-                            txt = s.get("text", "").strip()
-                            if len(txt) > 1 and s.get("size", 0) >= 16:
-                                if not wm_meta:
-                                    c = s.get("color", 0)
-                                    r = (c >> 16) & 0xFF
-                                    g = (c >> 8) & 0xFF
-                                    b_val = c & 0xFF
-                                    hex_col = f"{r:02x}{g:02x}{b_val:02x}".upper() if c != 0 else "2562EB"
-                                    font_name = s.get("font", "DejaVu Sans")
-                                    if "-" in font_name:
-                                        font_name = font_name.split("-")[0]
-                                    wm_meta = {
-                                        "text": txt,
-                                        "size": s.get("size", 42),
-                                        "font": font_name,
-                                        "color": hex_col,
-                                    }
-                                if p_no not in wm_pages:
-                                    wm_pages.append(p_no)
+        watermark_meta = None
+        watermark_pages = []
+        has_page_numbers = False
+        footer_candidate_lines = []
+        body_cleaning_signatures = set()
+        background_image_xrefs = set()
+        page_w = 595.0
+
+        for page_idx, page in enumerate(doc_pdf):
+            page_h = page.rect.height
+            page_w = page.rect.width
+            page_area = page_w * page_h
+
+            footer_top_y = page_h * 0.915  # Bottom ~8.5% margin for footers
+            d = page.get_text("dict")
+
+            # 1. Image analysis on this page
+            page_imgs = page.get_images()
+            for img_info in page_imgs:
+                xref = img_info[0]
+                img_rects = page.get_image_rects(xref)
+                for r in img_rects:
+                    img_area = r.width * r.height
+                    is_large_centered = (r.width > page_w * 0.45 and r.height > page_h * 0.35)
+                    is_huge = (img_area >= page_area * 0.25)
+                    if is_large_centered or is_huge:
+                        background_image_xrefs.add(xref)
+
+            page_footer_lines = []
+
+            # 2. Text block analysis
+            for block in d.get("blocks", []):
+                if block.get("type") == 0:  # Text
+                    for line in block.get("lines", []):
+                        dx, dy = line.get("dir", (1, 0))
+                        line_bbox = line.get("bbox", (0, 0, 0, 0))
+                        spans = line.get("spans", [])
+                        line_text = "".join(s.get("text", "") for s in spans).strip()
+
+                        # A. Check for diagonal text watermark (|dy| > 0.08 and size >= 14)
+                        if abs(dy) > 0.08:
+                            for s in spans:
+                                txt = s.get("text", "").strip()
+                                if len(txt) > 1 and s.get("size", 0) >= 14:
+                                    if not watermark_meta:
+                                        c = s.get("color", 0)
+                                        r_col = (c >> 16) & 0xFF
+                                        g_col = (c >> 8) & 0xFF
+                                        b_col = c & 0xFF
+                                        hex_col = f"{r_col:02x}{g_col:02x}{b_col:02x}".upper() if c != 0 else "2562EB"
+                                        font_name = s.get("font", "DejaVu Sans")
+                                        if "-" in font_name:
+                                            font_name = font_name.split("-")[0]
+                                        # In PDF coordinates (y down), visual upward angle:
+                                        visual_deg = math.degrees(math.atan2(-dy, dx))
+                                        # In Word DrawingML, rot is clockwise: (360 - visual_deg) * 60000
+                                        rot_val = int(round((360.0 - visual_deg) * 60000)) % 21600000
+                                        watermark_meta = {
+                                            "text": txt,
+                                            "size": s.get("size", 42),
+                                            "font": font_name,
+                                            "color": hex_col,
+                                            "rot": rot_val if rot_val != 0 else 19800000,
+                                        }
+                                    if page_idx not in watermark_pages:
+                                        watermark_pages.append(page_idx)
+
+                        # B. Check for footer zone content (y >= footer_top_y)
+                        elif line_bbox[1] >= footer_top_y or line_bbox[3] >= footer_top_y:
+                            if line_text:
+                                # Standalone page number (e.g. '1', '2', 'Page 1 of 3')
+                                if line_text.isdigit() or re.match(r"^page\s*\d+(\s*of\s*\d+)?$", line_text, re.I):
+                                    has_page_numbers = True
+                                    body_cleaning_signatures.add(line_text)
+                                # Contact / Address text footer
+                                elif any(k in line_text.lower() for k in ("tel:", "email:", "e-mail:", "web:", "www.", "usa:", "copyright", "©")):
+                                    page_footer_lines.append({
+                                        "bbox": line_bbox,
+                                        "text": line_text,
+                                        "spans": spans,
+                                    })
+                                    if len(line_text) >= 4:
+                                        body_cleaning_signatures.add(line_text)
+                                        sub_parts = re.split(r'\s{2,}|\t|(?=Tel:)|(?=E-mail:)|(?=Email:)|(?=Web:)|(?=USA:)', line_text)
+                                        for sp in sub_parts:
+                                            sp_clean = sp.strip()
+                                            if len(sp_clean) >= 4:
+                                                body_cleaning_signatures.add(sp_clean)
+                                        # Also add URLs and emails explicitly
+                                        for link_match in re.findall(r'(https?://[^\s,]+|www\.[^\s,]+|[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)', line_text):
+                                            body_cleaning_signatures.add(link_match)
+
+            if page_footer_lines:
+                footer_candidate_lines.append(page_footer_lines)
+
         doc_pdf.close()
-        if wm_meta:
-            wm_meta["pages_present"] = wm_pages
-            return wm_meta
-        return None
+
+        if watermark_meta:
+            watermark_meta["pages_present"] = watermark_pages
+
+        # Build structured footer rows for text footers
+        structured_footer_rows = []
+        if footer_candidate_lines:
+            sample_lines = max(footer_candidate_lines, key=len)
+            mid_x = page_w * 0.48
+
+            for line_item in sample_lines:
+                spans = line_item.get("spans", [])
+                line_text = line_item.get("text", "")
+                left_parts = []
+                right_parts = []
+
+                for s in spans:
+                    stext = s.get("text", "").strip()
+                    if not stext:
+                        continue
+                    s_bbox = s.get("bbox", (0, 0, 0, 0))
+                    if s_bbox[0] < mid_x:
+                        left_parts.append(stext)
+                    else:
+                        right_parts.append(stext)
+
+                left_str = " ".join(left_parts).strip()
+                right_str = " ".join(right_parts).strip()
+
+                if not right_str and any(k in line_text for k in ("Tel:", "E-mail:", "Email:", "Phone:", "www.", "Web:")):
+                    parts = re.split(r'\s{2,}|\t|(?=Tel:)|(?=E-mail:)|(?=Email:)|(?=Phone:)', line_text)
+                    parts = [p.strip() for p in parts if p.strip()]
+                    if len(parts) >= 2:
+                        left_str = parts[0]
+                        right_str = " ".join(parts[1:])
+                    else:
+                        left_str = line_text
+                        right_str = ""
+                elif not left_str and not right_str:
+                    left_str = line_text
+                    right_str = ""
+
+                sample_span = spans[0] if spans else {}
+                c = sample_span.get("color", 0)
+                r_col = (c >> 16) & 0xFF
+                g_col = (c >> 8) & 0xFF
+                b_col = c & 0xFF
+                hex_col = f"{r_col:02x}{g_col:02x}{b_col:02x}".upper() if c != 0 else "71717A"
+                if hex_col in ("000000", "FFFFFF"):
+                    hex_col = "71717A"
+
+                font_name = sample_span.get("font", "Calibri")
+                if "-" in font_name:
+                    font_name = font_name.split("-")[0]
+                if font_name.lower().startswith("dejavu"):
+                    font_name = "Calibri"
+
+                font_sz_pt = max(7.5, min(9.5, sample_span.get("size", 8.0)))
+
+                structured_footer_rows.append({
+                    "left_text": left_str,
+                    "right_text": right_str,
+                    "font": font_name,
+                    "size_half_pt": int(round(font_sz_pt * 2)),
+                    "color": hex_col,
+                })
+
+        return {
+            "watermark": watermark_meta,
+            "has_page_numbers": has_page_numbers,
+            "has_text_footer": len(structured_footer_rows) > 0,
+            "footer_rows": structured_footer_rows,
+            "body_cleaning_signatures": list(body_cleaning_signatures),
+            "background_image_xrefs": background_image_xrefs,
+        }
     except Exception as e:
-        logger.warning(f"Watermark pre-scan encountered an issue: {e}")
-        return None
+        logger.warning(f"PDF pre-flight layout analysis issue: {e}")
+        return {
+            "watermark": None,
+            "has_page_numbers": False,
+            "has_text_footer": False,
+            "footer_rows": [],
+            "body_cleaning_signatures": [],
+            "background_image_xrefs": set(),
+        }
 
 
 def apply_word_post_processing(
     docx_path: Path,
-    watermark_info: Optional[Dict[str, Any]] = None,
+    layout_info: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """
-    Applies essential post-processing to the generated Word DOCX:
-    1. Forces default View to 'Print Layout' in word/settings.xml so Word never opens in Web/Draft mode.
-    2. Normalizes paragraph spacing and moves body page numbers to Word footers.
-    3. Retains floating user image layering in front of text (behindDoc="0").
-    4. Auto-fits table columns for cross-suite layout parity (Word + WPS Office).
-    5. Injects modern DrawingML watermark into the header (Page 1 only if detected only on Page 1).
-    6. Injects dynamic native Page Numbers (<w:fldSimple w:instr="PAGE"/>) into the footer.
+    Applies semantic layout refinements to the generated Word DOCX based on pre-flight inspection:
+    1. Sets default View to 'Print Layout' in word/settings.xml so Word opens in standard layout.
+    2. Injects modern DrawingML watermark into Header with correct counter-clockwise orientation matching PDF.
+    3. Selectively sets behindDoc="1" for large background watermark emblems and behindDoc="0" for foreground photos/signatures.
+    4. Cleans misplaced footer lines (including hyperlinked runs) and body page numbers from body paragraphs.
+    5. Normalizes paragraph spacing so content fits cleanly on intended pages.
+    6. Injects native page numbers or rich text footers (with styled hyperlinks) into Word footers.
     """
     try:
         doc = docx.Document(str(docx_path))
@@ -82,55 +286,67 @@ def apply_word_post_processing(
         # 1. Force Print Layout view mode by default in settings.xml
         try:
             settings_elm = doc.settings.element
-            view_xml = f'<w:view {nsdecls("w")} w:val="print"/>'
-            settings_elm.insert(0, parse_xml(view_xml))
+            if not settings_elm.xpath("w:view"):
+                view_xml = f'<w:view {nsdecls("w")} w:val="print"/>'
+                settings_elm.insert(0, parse_xml(view_xml))
         except Exception as view_err:
             logger.warning(f"Failed to set print layout view setting: {view_err}")
 
-        # 2. Normalize paragraph spacing & remove standalone body page number paragraphs
+        # 2. Normalize paragraph spacing & remove misplaced body page numbers / footer lines
         try:
             from docx.shared import Pt
+            cleaning_sigs = [s.lower() for s in (layout_info.get("body_cleaning_signatures", []) if layout_info else []) if len(s.strip()) >= 3]
             for p in list(doc.paragraphs):
-                txt_clean = p.text.strip()
-                if txt_clean.isdigit() and len(txt_clean) <= 3:
+                # Extract ALL text inside paragraph including hyperlinks and nested runs
+                full_text = "".join(p._element.xpath(".//w:t/text()")).strip()
+                full_text_lower = full_text.lower()
+
+                # Remove standalone body page numbers (e.g. '1', '2', '3') so they don't create blank pages
+                if full_text.isdigit() and len(full_text) <= 3:
                     p._element.getparent().remove(p._element)
-                else:
-                    pf = p.paragraph_format
-                    if pf.space_before and pf.space_before.pt > 6:
-                        pf.space_before = Pt(round(pf.space_before.pt * 0.45, 1))
-                    pf.space_after = Pt(0)
-                    pf.line_spacing = 1.0
+                    continue
+                if re.match(r"^page\s*\d+(\s*of\s*\d+)?$", full_text, re.I):
+                    p._element.getparent().remove(p._element)
+                    continue
+
+                # Remove misplaced footer signatures from body text
+                if cleaning_sigs and any(sig in full_text_lower for sig in cleaning_sigs):
+                    p._element.getparent().remove(p._element)
+                    continue
+
+                pf = p.paragraph_format
+                if pf.space_before and pf.space_before.pt > 4:
+                    pf.space_before = Pt(round(pf.space_before.pt * 0.4, 1))
+                pf.space_after = Pt(0)
+                pf.line_spacing = 1.0
         except Exception as spacing_err:
             logger.warning(f"Failed to normalize paragraph spacing: {spacing_err}")
 
-        # 3. Ensure user images overlay IN FRONT of text (behindDoc="0")
+        # 3. Image Z-Order & Layering:
+        # Floating background watermark graphics (large / centered) -> behindDoc="1"
+        # Content photos, signatures, stamps -> behindDoc="0"
         try:
             for anchor in doc._element.xpath(".//wp:anchor"):
-                anchor.set("behindDoc", "0")
+                extent = anchor.xpath("wp:extent")
+                cx = int(extent[0].get("cx", 0)) if extent else 0
+                cy = int(extent[0].get("cy", 0)) if extent else 0
+                # If image is very large (e.g. > 3 inches in both dimensions, cx >= 2,743,200 and cy >= 2,743,200) -> background emblem
+                is_background_emblem = (cx >= 2743200 and cy >= 2743200)
+                if is_background_emblem:
+                    anchor.set("behindDoc", "1")
+                else:
+                    # Content photos (e.g. building photo, signature) stay in foreground
+                    anchor.set("behindDoc", "0")
         except Exception as anchor_err:
             logger.warning(f"Failed to adjust drawing Z-order: {anchor_err}")
 
-        # 4. Optimize table layout and autofit for cross-suite compatibility (Microsoft Word & WPS Office)
-        try:
-            from docx.shared import Inches
-            for t in doc.tables:
-                t.autofit = True
-                tblPr = t._element.xpath("w:tblPr")
-                if tblPr:
-                    tblPr[0].append(parse_xml(f'<w:tblLayout {nsdecls("w")} w:type="autofit"/>'))
-                for row in t.rows:
-                    if len(row.cells) >= 3:
-                        row.cells[0].width = Inches(1.2)
-                        row.cells[1].width = Inches(4.5)
-                        row.cells[2].width = Inches(1.5)
-        except Exception as tbl_err:
-            logger.warning(f"Failed to optimize table layout: {tbl_err}")
-
-        # 5. Inject Modern DrawingML Watermark if detected
+        # 4. Inject Modern DrawingML Watermark into Header if detected in source PDF
+        watermark_info = layout_info.get("watermark") if layout_info else None
         if watermark_info and doc.sections:
             watermark_text = watermark_info.get("text", "Watermark")
             watermark_font = watermark_info.get("font", "DejaVu Sans")
             watermark_color = watermark_info.get("color", "2562EB")
+            watermark_rot = watermark_info.get("rot", 19800000)
             wm_pages = watermark_info.get("pages_present", [0])
 
             drawingml_xml = (
@@ -160,7 +376,7 @@ def apply_word_post_processing(
                 f'            <wps:wsp>\n'
                 f'              <wps:cNvSpPr txBox="1"/>\n'
                 f'              <wps:spPr>\n'
-                f'                <a:xfrm rot="18900000">\n'
+                f'                <a:xfrm rot="{watermark_rot}">\n'
                 f'                  <a:off x="0" y="0"/>\n'
                 f'                  <a:ext cx="5486400" cy="1371600"/>\n'
                 f'                </a:xfrm>\n'
@@ -204,16 +420,12 @@ def apply_word_post_processing(
             )
 
             sec1 = doc.sections[0]
-            # If watermark was only on Page 1 in PDF, use different_first_page_header_footer
             if wm_pages == [0]:
                 sec1.different_first_page_header_footer = True
                 f_header = sec1.first_page_header
                 for p in list(f_header.paragraphs):
                     p._element.getparent().remove(p._element)
                 f_header._element.append(parse_xml(drawingml_xml))
-
-                for p in list(sec1.header.paragraphs):
-                    p._element.getparent().remove(p._element)
             else:
                 header = sec1.header
                 for p in list(header.paragraphs):
@@ -222,10 +434,58 @@ def apply_word_post_processing(
                 for sec in doc.sections[1:]:
                     sec.header.is_linked_to_previous = True
 
-            logger.info(f"Injected modern DrawingML watermark '{watermark_text}' ({watermark_color}) on pages {wm_pages}")
+            logger.info(f"Injected modern DrawingML watermark '{watermark_text}' ({watermark_color}, rot={watermark_rot}) on pages {wm_pages}")
 
-        # 6. Inject Native Page Number Field into Word Footers
-        try:
+        # 5. Inject Extracted Footer / Dynamic Page Number into Word Footers
+        has_page_numbers = layout_info.get("has_page_numbers", False) if layout_info else False
+        has_text_footer = layout_info.get("has_text_footer", False) if layout_info else False
+        footer_rows = layout_info.get("footer_rows", []) if layout_info else []
+
+        if has_text_footer and footer_rows:
+            # Inject structured 2-column contact/address footer with active hyperlink styling
+            for sec in doc.sections:
+                for ftr_target in (sec.first_page_footer, sec.footer):
+                    for p in list(ftr_target.paragraphs):
+                        p._element.getparent().remove(p._element)
+                    for row in footer_rows:
+                        left_t = row.get("left_text", "")
+                        right_t = row.get("right_text", "")
+                        f_name = row.get("font", "Calibri")
+                        f_sz = row.get("size_half_pt", 16)
+                        f_col = row.get("color", "71717A")
+
+                        if right_t:
+                            left_runs = render_rich_footer_runs(left_t, f_name, f_sz, f_col)
+                            right_runs = render_rich_footer_runs(right_t, f_name, f_sz, f_col)
+                            ftr_p_xml = (
+                                f'<w:p {nsdecls("w")}>\n'
+                                f'  <w:pPr>\n'
+                                f'    <w:pStyle w:val="Footer"/>\n'
+                                f'    <w:tabs>\n'
+                                f'      <w:tab w:val="right" w:pos="9360"/>\n'
+                                f'    </w:tabs>\n'
+                                f'    <w:spacing w:before="0" w:after="0" w:line="220" w:lineRule="auto"/>\n'
+                                f'  </w:pPr>\n'
+                                f'{left_runs}\n'
+                                f'  <w:r><w:tab/></w:r>\n'
+                                f'{right_runs}\n'
+                                f'</w:p>'
+                            )
+                        else:
+                            left_runs = render_rich_footer_runs(left_t, f_name, f_sz, f_col)
+                            ftr_p_xml = (
+                                f'<w:p {nsdecls("w")}>\n'
+                                f'  <w:pPr>\n'
+                                f'    <w:pStyle w:val="Footer"/>\n'
+                                f'    <w:spacing w:before="0" w:after="0" w:line="220" w:lineRule="auto"/>\n'
+                                f'  </w:pPr>\n'
+                                f'{left_runs}\n'
+                                f'</w:p>'
+                            )
+                        ftr_target._element.append(parse_xml(ftr_p_xml))
+
+        elif has_page_numbers:
+            # Inject centered native Word page number field
             footer_page_xml = (
                 f'<w:p {nsdecls("w")}>\n'
                 f'  <w:pPr>\n'
@@ -236,17 +496,10 @@ def apply_word_post_processing(
                 f'</w:p>'
             )
             for sec in doc.sections:
-                fp_ftr = sec.first_page_footer
-                for p in list(fp_ftr.paragraphs):
-                    p._element.getparent().remove(p._element)
-                fp_ftr._element.append(parse_xml(footer_page_xml))
-
-                ftr = sec.footer
-                for p in list(ftr.paragraphs):
-                    p._element.getparent().remove(p._element)
-                ftr._element.append(parse_xml(footer_page_xml))
-        except Exception as ftr_err:
-            logger.warning(f"Failed to inject footer page numbers: {ftr_err}")
+                for ftr_target in (sec.first_page_footer, sec.footer):
+                    for p in list(ftr_target.paragraphs):
+                        p._element.getparent().remove(p._element)
+                    ftr_target._element.append(parse_xml(footer_page_xml))
 
         doc.save(str(docx_path))
         return True
@@ -334,12 +587,11 @@ def convert_pdf_sync(
 ) -> dict:
     """
     Synchronous conversion engine function.
-    Converts PDF layout to DOCX format page-by-page, invoking progress_callback after each page.
-    Automatically preserves background diagonal watermarks and enforces Print Layout view.
+    Converts PDF layout to DOCX format page-by-page using pdf2docx's native pipeline.
+    Preserves original PDF styling, layout, graphics, and backgrounds with high fidelity.
     """
     start_time = time.time()
     unlocked_pdf_path: Optional[Path] = None
-
     effective_pdf_path = pdf_path
 
     # Step 1: If password is provided, decrypt to a temporary unencrypted PDF
@@ -365,14 +617,13 @@ def convert_pdf_sync(
                 code="DECRYPTION_ERROR",
             )
 
-    # Pre-scan for background watermarks before conversion
-    watermark_info = extract_pdf_watermark(effective_pdf_path)
+    # Pre-scan PDF for layout structure, watermarks, images, and footers
+    layout_info = analyze_pdf_layout_structure(effective_pdf_path)
 
     cv: Optional[Converter] = None
     try:
         cv = Converter(str(effective_pdf_path))
         doc_page_count = len(cv.fitz_doc)
-        
         target_pages = pages if pages is not None else list(range(doc_page_count))
         total_target_count = len(target_pages)
 
@@ -382,44 +633,21 @@ def convert_pdf_sync(
                 code="NO_PAGES_SELECTED",
             )
 
-        cv_settings = cv.default_settings
+        if progress_callback:
+            progress_callback(0, total_target_count, "Initializing document layout analyzer", 10)
 
         if progress_callback:
-            progress_callback(0, total_target_count, "Initializing layout analyzer", 5)
+            progress_callback(1, total_target_count, "Reconstructing vector layout & styles", 40)
 
-        # Step 1: Load specific page indexes
-        cv.load_pages(pages=target_pages)
-
-        # Step 2: Parse document layout structure (margins, sections, headers)
-        cv.parse_document(**cv_settings)
-
-        # Step 3: Reconstruct page by page
-        for idx, page in enumerate(cv.pages):
-            page_num = idx + 1
-            percent = 10 + int((idx / total_target_count) * 75)
-            if progress_callback:
-                progress_callback(
-                    page_num,
-                    total_target_count,
-                    f"Reconstructing page {page_num} of {total_target_count}",
-                    percent,
-                )
-            page.parse(**cv_settings)
+        # Execute high-fidelity native conversion
+        cv.convert(str(docx_path), pages=target_pages)
 
         if progress_callback:
-            progress_callback(
-                total_target_count,
-                total_target_count,
-                "Packaging Word document layout and styles",
-                90,
-            )
+            progress_callback(total_target_count, total_target_count, "Finalizing Word document formatting", 85)
 
-        # Step 4: Make DOCX
-        cv.make_docx(str(docx_path), **cv_settings)
-
-        # Step 5: Post-processing (Force Print Layout view + Watermark injection)
+        # Apply semantic post-processing
         if docx_path.exists():
-            apply_word_post_processing(docx_path, watermark_info=watermark_info)
+            apply_word_post_processing(docx_path, layout_info=layout_info)
 
         duration = round(time.time() - start_time, 2)
         docx_size = docx_path.stat().st_size if docx_path.exists() else 0

@@ -5,7 +5,7 @@ import fitz
 import docx
 from PIL import Image
 
-from app.core.exceptions import FileValidationException, PasswordRequiredException, ConversionException
+from app.core.exceptions import FileValidationException, PasswordRequiredException
 from app.services.pdf_validator import pdf_validator
 from app.services.converter_engine import parse_page_range, convert_pdf_sync, convert_pdf_async
 from app.services.job_manager import job_manager, JobStatus
@@ -157,6 +157,9 @@ def test_convert_pdf_sync_full_document(tmp_path):
     doc = docx.Document(str(docx_path))
     full_text = " ".join([p.text for p in doc.paragraphs])
     assert "Sample Document" in full_text
+    # Verify any floating background graphics/anchors preserve behindDoc="1"
+    for anchor in doc._element.xpath(".//wp:anchor"):
+        assert anchor.get("behindDoc") == "1"
 
 
 def test_convert_pdf_sync_page_range(tmp_path):
@@ -232,3 +235,24 @@ async def test_job_manager_workflow(tmp_path):
 
     # 5. Unsubscribe
     await job_manager.unsubscribe(job_id, queue)
+
+
+def test_convert_pdf_custom_range_fidelity(tmp_path):
+    """Tests that single-page and custom-range conversions produce valid, uncorrupted DOCX documents."""
+    pdf_path = create_sample_pdf(tmp_path / "fidelity_doc.pdf", num_pages=5)
+    docx_path = tmp_path / "single_page1.docx"
+
+    # Convert single page 1 (index 0)
+    result = convert_pdf_sync(pdf_path=pdf_path, docx_path=docx_path, pages=[0])
+    assert result["success"] is True
+    assert result["pages_converted"] == 1
+    assert docx_path.exists()
+
+    word_doc = docx.Document(str(docx_path))
+    # Must have exactly 1 section without phantom pages or corrupted tables
+    assert len(word_doc.sections) == 1
+    full_text = " ".join(p.text for p in word_doc.paragraphs)
+    assert "Sample Document Page 1" in full_text
+    assert "Sample Document Page 2" not in full_text
+
+

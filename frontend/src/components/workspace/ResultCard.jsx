@@ -16,11 +16,8 @@ import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "../ui/card
 import { Badge } from "../ui/badge";
 
 export function ResultCard({
-  fileName,
   docxFilename,
-  originalSize,
   docxBlob,
-  docxUrl,
   pagesConverted,
   durationSeconds,
   onDownload,

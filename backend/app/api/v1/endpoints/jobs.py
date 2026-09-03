@@ -1,8 +1,7 @@
 import json
 import logging
 import asyncio
-from pathlib import Path
-from fastapi import APIRouter, BackgroundTasks, status, Request
+from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import StreamingResponse, FileResponse
 
 from app.core.exceptions import ResourceNotFoundException, FileValidationException

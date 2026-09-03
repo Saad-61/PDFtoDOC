@@ -1,5 +1,5 @@
 import React from "react";
-import { ShieldCheck, Lock, FileCheck2, Terminal } from "lucide-react";
+import { ShieldCheck, Lock, FileCheck2 } from "lucide-react";
 
 export function Footer() {
   return (

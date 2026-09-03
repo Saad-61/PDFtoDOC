@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { UploadCloud, FilePlus, KeyRound, ShieldAlert } from "lucide-react";
+import { UploadCloud, FilePlus } from "lucide-react";
 import { isPdfFile } from "../../utils/fileHelpers";
 import { ShimmerBorder } from "../bits/ShimmerBorder";
 import { Button } from "../ui/button";

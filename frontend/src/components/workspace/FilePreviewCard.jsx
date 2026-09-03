@@ -6,7 +6,6 @@ import {
   Layers,
   ArrowRight,
   RotateCcw,
-  AlertTriangle,
 } from "lucide-react";
 import { formatBytes } from "../../utils/fileHelpers";
 import { Button } from "../ui/button";

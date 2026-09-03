@@ -22,7 +22,7 @@ export function usePdfPreflight() {
       });
 
       // Handle password required callback
-      loadingTask.onPassword = (callback, reason) => {
+      loadingTask.onPassword = (_callback, _reason) => {
         setPreflightData((prev) => ({
           ...prev,
           isEncrypted: true,

@@ -5,9 +5,6 @@ from typing import Optional
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, Form, BackgroundTasks, status, Request
 from fastapi.responses import FileResponse
-
-from app.core.config import settings
-from app.core.exceptions import FileValidationException, ResourceNotFoundException
 from app.schemas.conversion import ValidationResult
 from app.schemas.job import JobCreateResponse, JobStatus
 from app.services.storage import storage_manager

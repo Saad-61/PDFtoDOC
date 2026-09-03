@@ -1,7 +1,12 @@
 from pathlib import Path
 from typing import List, Union
 from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+
+try:
+    from pydantic_settings import BaseSettings, SettingsConfigDict
+except ImportError:  # pragma: no cover
+    from pydantic import BaseModel as BaseSettings  # type: ignore
+    SettingsConfigDict = dict  # type: ignore
 
 
 class Settings(BaseSettings):

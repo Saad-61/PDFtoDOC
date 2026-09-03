@@ -7,7 +7,6 @@ import {
   Download,
   Trash2,
   Play,
-  Layers,
   Loader2,
 } from "lucide-react";
 import { formatBytes, isPdfFile } from "../../utils/fileHelpers";
@@ -15,7 +14,6 @@ import { convertPdfStream } from "../../services/api";
 import { triggerBlobDownload } from "../../utils/download";
 import { Button } from "../ui/button";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "../ui/card";
-import { Badge } from "../ui/badge";
 import { Progress } from "../ui/progress";
 
 export function BatchQueue() {
@@ -136,15 +134,26 @@ export function BatchQueue() {
         </div>
         <div className="flex items-center gap-2">
           {completedCount > 0 && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={downloadAllCompleted}
-              className="text-xs"
-            >
-              <Download className="w-3.5 h-3.5 mr-1.5" />
-              Download All ({completedCount})
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={downloadAllCompleted}
+                className="text-xs"
+              >
+                <Download className="w-3.5 h-3.5 mr-1.5" />
+                Download All ({completedCount})
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={clearCompleted}
+                disabled={isProcessingBatch}
+                className="text-xs text-taupe hover:text-ivory"
+              >
+                Clear Completed
+              </Button>
+            </>
           )}
           {queue.length > 0 && (
             <Button
