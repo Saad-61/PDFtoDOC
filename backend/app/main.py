@@ -85,14 +85,22 @@ app.add_exception_handler(Exception, generic_exception_handler)
 # Include API Router
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
+# Serve built Frontend UI from frontend/dist if available
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
 
-@app.get("/", tags=["Root"])
-async def root():
-    """Root status greeting with docs reference."""
-    return {
-        "service": settings.PROJECT_NAME,
-        "version": settings.VERSION,
-        "status": "online",
-        "docs": "/docs",
-        "api_v1": settings.API_V1_STR,
-    }
+frontend_dist_dir = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+if frontend_dist_dir.exists() and (frontend_dist_dir / "index.html").exists():
+    app.mount("/", StaticFiles(directory=str(frontend_dist_dir), html=True), name="frontend")
+else:
+    @app.get("/", tags=["Root"])
+    async def root():
+        """Root status greeting with docs reference."""
+        return {
+            "service": settings.PROJECT_NAME,
+            "version": settings.VERSION,
+            "status": "online",
+            "docs": "/docs",
+            "api_v1": settings.API_V1_STR,
+        }
+
