@@ -1,8 +1,13 @@
 import docx
+import pytest
 from pathlib import Path
 from app.services.converter_engine import convert_pdf_sync
 
+SAMPLE_PDF_PATH = Path("../sample-local-pdf_2_edited (2).pdf")
+LIPA_PDF_PATH = Path("../Warehouse_Managment_LIPA.pdf")
 
+
+@pytest.mark.skipif(not SAMPLE_PDF_PATH.exists(), reason="Local sample test PDF not present")
 def test_sample_pdf_watermark_and_images_and_page_numbers(tmp_path):
     """
     Tests sample-local-pdf_2_edited (2).pdf:
@@ -11,7 +16,7 @@ def test_sample_pdf_watermark_and_images_and_page_numbers(tmp_path):
     3. Page numbers in footer (<w:fldSimple w:instr="PAGE"/>).
     4. No leaked trailing body numbers creating blank pages.
     """
-    pdf_path = Path("../sample-local-pdf_2_edited (2).pdf")
+    pdf_path = SAMPLE_PDF_PATH
     docx_path = tmp_path / "sample_test.docx"
 
     result = convert_pdf_sync(pdf_path, docx_path)
@@ -37,6 +42,7 @@ def test_sample_pdf_watermark_and_images_and_page_numbers(tmp_path):
         assert anchor.get("behindDoc") == "0"
 
 
+@pytest.mark.skipif(not LIPA_PDF_PATH.exists(), reason="Local LIPA test PDF not present")
 def test_warehouse_lipa_pdf_emblem_and_contact_footer(tmp_path):
     """
     Tests Warehouse_Managment_LIPA.pdf:
@@ -44,7 +50,7 @@ def test_warehouse_lipa_pdf_emblem_and_contact_footer(tmp_path):
     2. Contact info is in footer with hyperlinked styling for web & email (color=0563C1, underline=single).
     3. NO page number fields injected into footer.
     """
-    pdf_path = Path("../Warehouse_Managment_LIPA.pdf")
+    pdf_path = LIPA_PDF_PATH
     docx_path = tmp_path / "lipa_test.docx"
 
     result = convert_pdf_sync(pdf_path, docx_path)

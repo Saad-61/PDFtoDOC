@@ -32,20 +32,31 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Environment Variables & Secrets
+# Environment Variables & Secrets (All directories)
 .env
 .env.*
+*.env
+**/.env
+**/.env.*
 !.env.example
 
-# Temporary Application Files & Personal Documents
-.pdf2docx_temp/
-*.pdf_temp/
-*.tmp
-*.docx_temp/
-*.log
-SaadAsifResume.pdf
+# Tools, Binaries & Downloaded Archives
+tools/
+*.zip
+*.tar
+*.gz
+*.exe
+*.msi
+
+# PDF / DOCX Documents & Temporary Conversion Artifacts
 *.pdf
 *.docx
+converted_document.docx
+.pdf2docx_temp/
+*.pdf_temp/
+*.docx_temp/
+*.tmp
+*.log
 
 # IDE & OS specific files
 .vscode/
